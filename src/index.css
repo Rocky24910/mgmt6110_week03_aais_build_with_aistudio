@@ -1,5 +1,49 @@
 @import "tailwindcss";
 
+/* Disqus Compatibility Styles:
+ * Disqus internal parseColor() regex only supports #hex, rgb(), rgba(), or named colors.
+ * Tailwind v4 emits modern oklch() color values, causing parseColor() in embed.js to crash.
+ * Provide explicit hex/rgb colors for html/body, the Disqus container, #disqus_thread, and links.
+ */
+html,
+body {
+  color: #0f172a;
+  background-color: #f8fafc;
+}
+
+.dark body,
+[data-theme="dark"] body {
+  color: #f8fafc;
+  background-color: #020617;
+}
+
+#feedback,
+#disqus_thread,
+#disqus_thread * {
+  color: #111827;
+}
+
+#feedback {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+#disqus_thread {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+#disqus_thread a,
+#feedback a {
+  color: #2563eb !important;
+}
+
+#disqus_thread span,
+#disqus_thread div,
+#disqus_thread p {
+  color: #111827 !important;
+}
+
 /* Subtle, accessible horizontal scrollbar for Bay Selector on Screen 2 */
 .bay-selector-scroll {
   scrollbar-width: thin;

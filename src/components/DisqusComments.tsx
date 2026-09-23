@@ -96,18 +96,35 @@ export const DisqusComments: React.FC = () => {
     <section
       id="feedback"
       aria-label="Feedback and Comments"
-      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 shadow-sm"
+      style={{
+        backgroundColor: '#ffffff',
+        color: '#111827',
+      }}
+      className="border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 shadow-sm"
     >
       <div className="mb-4">
-        <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+        <h3
+          style={{ color: '#111827' }}
+          className="text-base font-bold"
+        >
           Visitor Feedback
         </h3>
-        <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
+        <p
+          style={{ color: '#4b5563' }}
+          className="text-xs sm:text-sm mt-1"
+        >
           Tell us what worked for you and what did not — your feedback helps us improve.
         </p>
       </div>
 
-      <div id="disqus_thread" className="min-h-[160px]" />
+      <div
+        id="disqus_thread"
+        style={{
+          minHeight: '160px',
+          backgroundColor: '#ffffff',
+          color: '#111827',
+        }}
+      />
       <noscript>
         Please enable JavaScript to view the comments powered by Disqus.
       </noscript>
