@@ -9,6 +9,42 @@
     <meta property="og:description" content="Shift handover and daily facility monitoring dashboard for vertical farm operations technicians to monitor pH and nutrient levels across 12 automated hydro bays and flag abnormal ones." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      (function() {
+        // Prevent cross-origin third-party script errors (e.g. Disqus embeds/trackers) from bubbling unhandled
+        window.addEventListener('error', function(event) {
+          if (
+            event.message === 'Script error.' ||
+            (event.filename && (event.filename.indexOf('disqus') !== -1 || event.filename.indexOf('disquscdn') !== -1))
+          ) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        var prevOnError = window.onerror;
+        window.onerror = function(message, source, lineno, colno, error) {
+          if (
+            message === 'Script error.' ||
+            (typeof source === 'string' && (source.indexOf('disqus') !== -1 || source.indexOf('disquscdn') !== -1))
+          ) {
+            return true;
+          }
+          if (typeof prevOnError === 'function') {
+            return prevOnError.apply(this, arguments);
+          }
+          return false;
+        };
+
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event.reason ? String(event.reason) : '';
+          if (reason.indexOf('disqus') !== -1 || reason.indexOf('Script error') !== -1) {
+            event.preventDefault();
+          }
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

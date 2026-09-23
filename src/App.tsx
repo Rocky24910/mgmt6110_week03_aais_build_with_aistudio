@@ -12,6 +12,7 @@ import { ShiftHandoverOverview } from './components/ShiftHandoverOverview';
 import { BayInspectionActionForm } from './components/BayInspectionActionForm';
 import { HandoverSummaryLogs } from './components/HandoverSummaryLogs';
 import { HandoverConfirmModal } from './components/HandoverConfirmModal';
+import { DisqusComments } from './components/DisqusComments';
 
 export default function App() {
   // Screen state: 3 clear screens without page reloads
@@ -178,12 +179,15 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 pt-3 sm:pt-6 pb-24 md:pb-8 overflow-x-hidden min-w-0">
         {currentTab === 'overview' && (
-          <ShiftHandoverOverview
-            bays={bays}
-            shiftInfo={shiftInfo}
-            onInspectBay={handleInspectBay}
-            onSwitchToHandover={() => setCurrentTab('handover')}
-          />
+          <div className="space-y-6">
+            <ShiftHandoverOverview
+              bays={bays}
+              shiftInfo={shiftInfo}
+              onInspectBay={handleInspectBay}
+              onSwitchToHandover={() => setCurrentTab('handover')}
+            />
+            <DisqusComments />
+          </div>
         )}
 
         {currentTab === 'inspect' && (
