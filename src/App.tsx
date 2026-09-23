@@ -218,6 +218,42 @@ export default function App() {
         )}
       </main>
 
+      {/* Global Page Footer with Privacy Notice */}
+      <footer className="w-full border-t border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm py-4 px-4 sm:px-6 pb-20 md:pb-4 text-center text-xs text-slate-500 dark:text-slate-400">
+        <div className="max-w-7xl mx-auto">
+          <p className="leading-relaxed">
+            This page uses Microsoft Clarity and Disqus, which use cookies to record how visitors use the site and to host comments. By using this page you agree that we and Microsoft may collect and use this data. See the{' '}
+            <a
+              href="https://www.microsoft.com/privacy/privacystatement"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-600 dark:text-emerald-400 underline hover:text-emerald-700 dark:hover:text-emerald-300 font-medium"
+            >
+              Microsoft Privacy Statement
+            </a>
+            , the{' '}
+            <a
+              href="https://disqus.com/privacy-policy/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-600 dark:text-emerald-400 underline hover:text-emerald-700 dark:hover:text-emerald-300 font-medium"
+            >
+              Disqus privacy policy
+            </a>{' '}
+            and the{' '}
+            <a
+              href="https://disqus.com/data-sharing-settings/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-600 dark:text-emerald-400 underline hover:text-emerald-700 dark:hover:text-emerald-300 font-medium"
+            >
+              Disqus data sharing settings
+            </a>
+            .
+          </p>
+        </div>
+      </footer>
+
       {/* Mobile Bottom Navigation Bar */}
       <BottomNav
         currentTab={currentTab}
