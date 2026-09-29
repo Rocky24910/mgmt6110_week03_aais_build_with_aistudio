@@ -1,5 +1,6 @@
 import React from 'react';
 import { HydroBay } from '../types';
+import { getBayEffectiveSeverity } from '../utils/bayPrioritization';
 import { 
   CheckCircle2, 
   AlertTriangle, 
@@ -21,6 +22,8 @@ interface BayCardProps {
 }
 
 export const BayCard: React.FC<BayCardProps> = ({ bay, onInspect }) => {
+  const effectiveSeverity = getBayEffectiveSeverity(bay);
+
   // Determine pH state
   const isPhHigh = bay.pH > bay.targetPhMax;
   const isPhLow = bay.pH < bay.targetPhMin;
@@ -33,42 +36,46 @@ export const BayCard: React.FC<BayCardProps> = ({ bay, onInspect }) => {
 
   // Status Styling
   const getStatusBadge = () => {
-    switch (bay.status) {
-      case 'Normal':
-        return (
+    const isFlagged = bay.status === 'Flagged' || Boolean(bay.activeFlag);
+
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+        {/* Severity indicator */}
+        {effectiveSeverity === 'Critical' && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-300 dark:bg-rose-950/80 dark:text-rose-300 dark:border-rose-800 animate-pulse">
+            <AlertOctagon className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+            Critical
+          </span>
+        )}
+        {effectiveSeverity === 'Warning' && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/80 dark:text-amber-300 dark:border-amber-800">
+            <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+            Warning
+          </span>
+        )}
+        {effectiveSeverity === 'Normal' && !isFlagged && (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
             Normal
           </span>
-        );
-      case 'Warning':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/80 dark:text-amber-300 dark:border-amber-800">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            Warning
+        )}
+
+        {/* Handover Flag status badge */}
+        {isFlagged && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 dark:bg-indigo-950/80 dark:text-indigo-300 dark:border-indigo-800 shadow-sm">
+            <Flag className="w-3 h-3 text-indigo-600 dark:text-indigo-400 fill-indigo-500" />
+            Flagged
           </span>
-        );
-      case 'Critical':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-300 dark:bg-rose-950/80 dark:text-rose-300 dark:border-rose-800 animate-pulse">
-            <AlertOctagon className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-            Critical
-          </span>
-        );
-      case 'Flagged':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 dark:bg-indigo-950/80 dark:text-indigo-300 dark:border-indigo-800 shadow-sm">
-            <Flag className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 fill-indigo-500" />
-            Flagged for Shift
-          </span>
-        );
-    }
+        )}
+      </div>
+    );
   };
 
   const getBorderColor = () => {
-    switch (bay.status) {
-      case 'Flagged':
-        return 'border-indigo-500 ring-1 ring-indigo-400/30';
+    if (bay.status === 'Flagged' || bay.activeFlag) {
+      return 'border-indigo-500 ring-1 ring-indigo-400/30';
+    }
+    switch (effectiveSeverity) {
       case 'Critical':
         return 'border-rose-500 ring-1 ring-rose-400/30';
       case 'Warning':

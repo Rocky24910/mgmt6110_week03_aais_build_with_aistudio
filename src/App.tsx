@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { HydroBay, BayFlag, ActivityLog } from './types';
+import { HydroBay, BayFlag, ActivityLog, BayDraft } from './types';
+import { 
+  getBayEffectiveSeverity, 
+  getHighestPriorityUnresolvedBay 
+} from './utils/bayPrioritization';
 import { 
   INITIAL_BAYS, 
   INITIAL_SHIFT_INFO, 
@@ -17,13 +21,18 @@ import { DisqusComments } from './components/DisqusComments';
 export default function App() {
   // Screen state: 3 clear screens without page reloads
   const [currentTab, setCurrentTab] = useState<'overview' | 'inspect' | 'handover'>('overview');
-  const [selectedBayId, setSelectedBayId] = useState<string>('BAY-04'); // Start with an interesting abnormal bay
+  // Initial bay prioritizes the highest-severity unresolved bay (BAY-07)
+  const initialUnresolved = getHighestPriorityUnresolvedBay(INITIAL_BAYS);
+  const [selectedBayId, setSelectedBayId] = useState<string>(initialUnresolved?.id || 'BAY-07');
   
   // Data states (Separated from UI, loaded from mockData.ts)
   const [bays, setBays] = useState<HydroBay[]>(INITIAL_BAYS);
   const [shiftInfo, setShiftInfo] = useState(INITIAL_SHIFT_INFO);
   const [checklist, setChecklist] = useState(INITIAL_CHECKLIST);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(INITIAL_ACTIVITY_LOGS);
+  
+  // In-session unsaved bay drafts preservation (prevents data loss when switching bays)
+  const [bayDrafts, setBayDrafts] = useState<Record<string, BayDraft>>({});
   
   // Handover confirmation modal state
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
@@ -43,8 +52,11 @@ export default function App() {
   }, []);
 
   // Computed metrics
-  const flaggedCount = bays.filter((b) => b.status === 'Flagged' || b.activeFlag).length;
-  const abnormalCount = bays.filter((b) => b.status === 'Warning' || b.status === 'Critical').length;
+  const flaggedCount = bays.filter((b) => b.status === 'Flagged' || Boolean(b.activeFlag)).length;
+  const abnormalCount = bays.filter((b) => {
+    const sev = getBayEffectiveSeverity(b);
+    return (sev === 'Warning' || sev === 'Critical') && (!b.activeFlag || b.activeFlag.resolved);
+  }).length;
 
   // Handlers
   const handleInspectBay = (bayId: string) => {
@@ -53,12 +65,28 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleTabChange = (tab: 'overview' | 'inspect' | 'handover') => {
+    if (tab === 'inspect') {
+      // When navigating to inspect tab, prioritize the highest-severity unresolved bay
+      const highestUnresolved = getHighestPriorityUnresolvedBay(bays);
+      if (highestUnresolved) {
+        setSelectedBayId(highestUnresolved.id);
+      }
+    }
+    setCurrentTab(tab);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleFlagBay = (bayId: string, flag: BayFlag) => {
+    if (shiftInfo.isLocked) return;
+
     setBays((prevBays) =>
       prevBays.map((bay) => {
         if (bay.id === bayId) {
+          const effectiveSeverity = getBayEffectiveSeverity(bay);
           return {
             ...bay,
+            severity: effectiveSeverity, // Preserves underlying severity (Critical/Warning)
             status: 'Flagged',
             statusMessage: `FLAGGED: ${flag.category} (${flag.priority} Priority). ${flag.notes}`,
             activeFlag: flag,
@@ -80,21 +108,30 @@ export default function App() {
     };
 
     setActivityLogs((prev) => [newLog, ...prev]);
+    // Clear unsaved draft once submitted as official flag
+    handleClearBayDraft(bayId);
   };
 
   const handleResolveFlag = (bayId: string) => {
+    if (shiftInfo.isLocked) return;
+
     setBays((prevBays) =>
       prevBays.map((bay) => {
         if (bay.id === bayId) {
-          // Check whether sensors are currently normal or warning
-          const isPhOff = bay.pH < bay.targetPhMin || bay.pH > bay.targetPhMax;
-          const isEcOff = bay.ec < bay.targetEcMin || bay.ec > bay.targetEcMax;
-          const newStatus = isPhOff || isEcOff ? 'Warning' : 'Normal';
+          // Bay severity is determined by the underlying bay readings/conditions,
+          // NOT by whether a handover flag is active, resolved, or removed.
+          const effectiveSeverity = getBayEffectiveSeverity(bay);
 
           return {
             ...bay,
-            status: newStatus,
-            statusMessage: newStatus === 'Normal' ? 'Parameters stabilized. Flag resolved.' : 'Flag resolved. Monitoring bay readings.',
+            severity: effectiveSeverity,
+            status: effectiveSeverity, // Critical bays remain Critical!
+            statusMessage:
+              effectiveSeverity === 'Critical'
+                ? `CRITICAL: High pH spike (${bay.pH.toFixed(2)}) and elevated chiller water temp (${bay.waterTemp.toFixed(1)}°C). Flag resolved; active monitoring ongoing.`
+                : effectiveSeverity === 'Warning'
+                ? 'WARNING: Telemetry slightly off target. Flag resolved; monitoring bay readings.'
+                : 'Parameters stabilized within nominal range. Flag resolved.',
             activeFlag: null,
             lastUpdated: 'Just now',
           };
@@ -114,15 +151,33 @@ export default function App() {
     };
 
     setActivityLogs((prev) => [resolveLog, ...prev]);
+    handleClearBayDraft(bayId);
+  };
+
+  const handleUpdateBayDraft = (bayId: string, draft: BayDraft) => {
+    setBayDrafts((prev) => ({
+      ...prev,
+      [bayId]: draft,
+    }));
+  };
+
+  const handleClearBayDraft = (bayId: string) => {
+    setBayDrafts((prev) => {
+      const updated = { ...prev };
+      delete updated[bayId];
+      return updated;
+    });
   };
 
   const handleToggleChecklist = (id: string) => {
+    if (shiftInfo.isLocked) return;
     setChecklist((prev) =>
       prev.map((item) => (item.id === id ? { ...item, completed: !item.completed } : item))
     );
   };
 
   const handleAddLog = (details: string) => {
+    if (shiftInfo.isLocked) return;
     const customLog: ActivityLog = {
       id: `log-${Date.now()}`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' SGT',
@@ -160,16 +215,26 @@ export default function App() {
       ...prev,
       isLocked: false,
     }));
+
+    const unlockLog: ActivityLog = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' SGT',
+      technician: shiftInfo.outgoingLead,
+      actionType: 'CALIBRATION',
+      details: `Shift Handover log reopened for amendments by ${shiftInfo.outgoingLead}. Verification lock released.`,
+    };
+
+    setActivityLogs((prev) => [unlockLog, ...prev]);
   };
 
-  const flaggedBaysList = bays.filter((b) => b.status === 'Flagged' || b.activeFlag);
+  const flaggedBaysList = bays.filter((b) => b.status === 'Flagged' || Boolean(b.activeFlag));
 
   return (
     <div className="min-h-screen bg-slate-50/80 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans antialiased selection:bg-emerald-500 selection:text-white">
       {/* Top Header with Tab Switcher */}
       <Header
         currentTab={currentTab}
-        onTabChange={setCurrentTab}
+        onTabChange={handleTabChange}
         shiftInfo={shiftInfo}
         flaggedCount={flaggedCount}
         abnormalCount={abnormalCount}
@@ -200,6 +265,10 @@ export default function App() {
             onBackToOverview={() => setCurrentTab('overview')}
             onProceedToHandover={() => setCurrentTab('handover')}
             currentTechnician={shiftInfo.outgoingLead}
+            isLocked={shiftInfo.isLocked}
+            bayDrafts={bayDrafts}
+            onUpdateBayDraft={handleUpdateBayDraft}
+            onClearBayDraft={handleClearBayDraft}
           />
         )}
 
@@ -257,7 +326,7 @@ export default function App() {
       {/* Mobile Bottom Navigation Bar */}
       <BottomNav
         currentTab={currentTab}
-        onTabChange={setCurrentTab}
+        onTabChange={handleTabChange}
         flaggedCount={flaggedCount}
         abnormalCount={abnormalCount}
       />
@@ -268,6 +337,8 @@ export default function App() {
         onClose={() => setIsConfirmModalOpen(false)}
         shiftInfo={shiftInfo}
         flaggedBays={flaggedBaysList}
+        checklist={checklist}
+        allBays={bays}
         onConfirmLock={handleConfirmLockShift}
       />
     </div>

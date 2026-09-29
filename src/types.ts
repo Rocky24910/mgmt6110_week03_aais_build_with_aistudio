@@ -33,6 +33,15 @@ export interface BayFlag {
   resolved: boolean;
 }
 
+export interface BayDraft {
+  category: IssueCategory;
+  priority: PriorityLevel;
+  notes: string;
+  actionRequired: string;
+  assignedTeam: string;
+  isDirty?: boolean;
+}
+
 export interface HydroBay {
   id: string; // e.g. "BAY-01"
   name: string;
@@ -59,6 +68,7 @@ export interface HydroBay {
   waterLevelPct: number; // Reservoir water level %
   flowRateLpm: number; // Liters per minute
   
+  severity?: 'Normal' | 'Warning' | 'Critical';
   status: HealthStatus;
   statusMessage: string;
   lastUpdated: string;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { HydroBay, IssueCategory, PriorityLevel, BayFlag } from '../types';
+import { HydroBay, IssueCategory, PriorityLevel, BayFlag, BayDraft } from '../types';
 import { ISSUE_CATEGORIES, PRIORITY_LEVELS } from '../data/mockData';
+import { getBayEffectiveSeverity } from '../utils/bayPrioritization';
 import { 
   AlertTriangle, 
   Flag, 
@@ -19,7 +20,9 @@ import {
   User,
   Users,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Lock,
+  Edit3
 } from 'lucide-react';
 
 interface BayInspectionActionFormProps {
@@ -31,6 +34,51 @@ interface BayInspectionActionFormProps {
   onBackToOverview: () => void;
   onProceedToHandover: () => void;
   currentTechnician: string;
+  isLocked?: boolean;
+  bayDrafts?: Record<string, BayDraft>;
+  onUpdateBayDraft?: (bayId: string, draft: BayDraft) => void;
+  onClearBayDraft?: (bayId: string) => void;
+}
+
+// Helper to compute standard default sensor recommendations for a bay
+function getDefaultSensorTemplate(bay: HydroBay) {
+  if (bay.pH > bay.targetPhMax) {
+    return {
+      category: 'pH Spike (Alkaline Drift)' as IssueCategory,
+      notes: `Detected abnormal pH spike to ${bay.pH.toFixed(2)} (Target max is ${bay.targetPhMax.toFixed(2)}). Buffer dosing response was delayed.`,
+      actionRequired: 'Perform manual 100ml buffer dosing and recalibrate automated acid pump line.',
+    };
+  } else if (bay.pH < bay.targetPhMin) {
+    return {
+      category: 'pH Drop (Acidic Drift)' as IssueCategory,
+      notes: `Detected rapid acidic drop to ${bay.pH.toFixed(2)} (Target min is ${bay.targetPhMin.toFixed(2)}). Root zone acidification suspected.`,
+      actionRequired: 'Perform 15% reservoir water dilution and verify automated base doser valve.',
+    };
+  } else if (bay.ec < bay.targetEcMin) {
+    return {
+      category: 'EC Nutrient Depletion' as IssueCategory,
+      notes: `Nutrient EC level depleted to ${bay.ec.toFixed(2)} mS/cm (Target min is ${bay.targetEcMin.toFixed(2)} mS/cm).`,
+      actionRequired: 'Check nutrient concentrate A/B tanks and verify pump feed tubing.',
+    };
+  } else if (bay.ec > bay.targetEcMax) {
+    return {
+      category: 'EC Salt Concentration' as IssueCategory,
+      notes: `Nutrient EC level spiked to ${bay.ec.toFixed(2)} mS/cm (Target max is ${bay.targetEcMax.toFixed(2)} mS/cm).`,
+      actionRequired: 'Top up RO fresh water reservoir and verify auto-refill valve.',
+    };
+  } else if (bay.waterTemp > bay.targetTempMax) {
+    return {
+      category: 'Water Temp Anomaly' as IssueCategory,
+      notes: `Chiller water temp reached ${bay.waterTemp.toFixed(1)}°C (Target max is ${bay.targetTempMax.toFixed(1)}°C).`,
+      actionRequired: 'Inspect chiller unit coolant compressor and clean heat exchanger intake filter.',
+    };
+  } else {
+    return {
+      category: 'Sensor Drift / Desync' as IssueCategory,
+      notes: `Manual test check recommended for ${bay.id}.`,
+      actionRequired: 'Perform dual-probe cross-validation test.',
+    };
+  }
 }
 
 export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = ({
@@ -42,6 +90,10 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
   onBackToOverview,
   onProceedToHandover,
   currentTechnician,
+  isLocked = false,
+  bayDrafts = {},
+  onUpdateBayDraft,
+  onClearBayDraft,
 }) => {
   const selectedBay = bays.find((b) => b.id === selectedBayId) || bays[0];
 
@@ -63,6 +115,7 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
   );
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [validationErrors, setValidationErrors] = useState<{ assignedTeam?: string; notes?: string }>({});
 
   // Horizontal scroll controls for the 12-bay selector row
   const bayScrollRef = React.useRef<HTMLDivElement>(null);
@@ -115,8 +168,22 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
     }
   };
 
-  // Auto-fill form if switching to another bay
+  // Restore unsaved draft or auto-fill form if switching to another bay
   useEffect(() => {
+    // Clear validation errors when switching bays
+    setValidationErrors({});
+
+    // Check if an unsaved draft exists for this bay during the current session
+    if (bayDrafts && bayDrafts[selectedBay.id]) {
+      const draft = bayDrafts[selectedBay.id];
+      setCategory(draft.category);
+      setPriority(draft.priority);
+      setNotes(draft.notes);
+      setActionRequired(draft.actionRequired);
+      setAssignedTeam(draft.assignedTeam);
+      return;
+    }
+
     if (selectedBay.activeFlag) {
       setCategory(selectedBay.activeFlag.category);
       setPriority(selectedBay.activeFlag.priority);
@@ -124,39 +191,157 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
       setActionRequired(selectedBay.activeFlag.actionRequired);
       setAssignedTeam(selectedBay.activeFlag.assignedTeam);
     } else {
-      // Suggest category based on sensor reading
-      if (selectedBay.pH > selectedBay.targetPhMax) {
-        setCategory('pH Spike (Alkaline Drift)');
-        setNotes(`Detected abnormal pH spike to ${selectedBay.pH.toFixed(2)} (Target max is ${selectedBay.targetPhMax.toFixed(2)}). Buffer dosing response was delayed.`);
-        setActionRequired('Perform manual 100ml buffer dosing and recalibrate automated acid pump line.');
-      } else if (selectedBay.pH < selectedBay.targetPhMin) {
-        setCategory('pH Drop (Acidic Drift)');
-        setNotes(`Detected rapid acidic drop to ${selectedBay.pH.toFixed(2)} (Target min is ${selectedBay.targetPhMin.toFixed(2)}). Root zone acidification suspected.`);
-        setActionRequired('Perform 15% reservoir water dilution and verify automated base doser valve.');
-      } else if (selectedBay.ec < selectedBay.targetEcMin) {
-        setCategory('EC Nutrient Depletion');
-        setNotes(`Nutrient EC level depleted to ${selectedBay.ec.toFixed(2)} mS/cm (Target min is ${selectedBay.targetEcMin.toFixed(2)} mS/cm).`);
-        setActionRequired('Check nutrient concentrate A/B tanks and verify pump feed tubing.');
-      } else if (selectedBay.ec > selectedBay.targetEcMax) {
-        setCategory('EC Salt Concentration');
-        setNotes(`Nutrient EC level spiked to ${selectedBay.ec.toFixed(2)} mS/cm (Target max is ${selectedBay.targetEcMax.toFixed(2)} mS/cm).`);
-        setActionRequired('Top up RO fresh water reservoir and verify auto-refill valve.');
-      } else if (selectedBay.waterTemp > selectedBay.targetTempMax) {
-        setCategory('Water Temp Anomaly');
-        setNotes(`Chiller water temp reached ${selectedBay.waterTemp.toFixed(1)}°C (Target max is ${selectedBay.targetTempMax.toFixed(1)}°C).`);
-        setActionRequired('Inspect chiller unit coolant compressor and clean heat exchanger intake filter.');
-      } else {
-        setCategory('Sensor Drift / Desync');
-        setNotes(`Manual test check recommended for ${selectedBay.id}.`);
-        setActionRequired('Perform dual-probe cross-validation test.');
-      }
+      const template = getDefaultSensorTemplate(selectedBay);
+      setCategory(template.category);
       setPriority('High');
+      setNotes(template.notes);
+      setActionRequired(template.actionRequired);
       setAssignedTeam('Night Shift Dosing Specialist');
     }
   }, [selectedBay.id, selectedBay.activeFlag]);
 
+  // Save current form fields as draft for the active bay
+  const saveCurrentDraft = (bayId: string) => {
+    onUpdateBayDraft?.(bayId, {
+      category,
+      priority,
+      notes,
+      actionRequired,
+      assignedTeam,
+      isDirty: true,
+    });
+  };
+
+  // Safe bay switching: preserves in-progress draft before switching
+  const handleSelectBay = (targetBayId: string) => {
+    if (targetBayId === selectedBay.id) return;
+    saveCurrentDraft(selectedBay.id);
+    onSelectBay(targetBayId);
+  };
+
+  const handleBackToOverview = () => {
+    saveCurrentDraft(selectedBay.id);
+    onBackToOverview();
+  };
+
+  const handleProceedToHandover = () => {
+    saveCurrentDraft(selectedBay.id);
+    onProceedToHandover();
+  };
+
+  const handleDiscardDraft = () => {
+    onClearBayDraft?.(selectedBay.id);
+    setValidationErrors({});
+    if (selectedBay.activeFlag) {
+      setCategory(selectedBay.activeFlag.category);
+      setPriority(selectedBay.activeFlag.priority);
+      setNotes(selectedBay.activeFlag.notes);
+      setActionRequired(selectedBay.activeFlag.actionRequired);
+      setAssignedTeam(selectedBay.activeFlag.assignedTeam);
+    } else {
+      const template = getDefaultSensorTemplate(selectedBay);
+      setCategory(template.category);
+      setPriority('High');
+      setNotes(template.notes);
+      setActionRequired(template.actionRequired);
+      setAssignedTeam('Night Shift Dosing Specialist');
+    }
+  };
+
+  // Handlers to update draft state continuously so edits are never lost
+  const handleCategoryChange = (val: IssueCategory) => {
+    setCategory(val);
+    onUpdateBayDraft?.(selectedBay.id, {
+      category: val,
+      priority,
+      notes,
+      actionRequired,
+      assignedTeam,
+      isDirty: true,
+    });
+  };
+
+  const handlePriorityChange = (val: PriorityLevel) => {
+    setPriority(val);
+    onUpdateBayDraft?.(selectedBay.id, {
+      category,
+      priority: val,
+      notes,
+      actionRequired,
+      assignedTeam,
+      isDirty: true,
+    });
+  };
+
+  const handleAssignedTeamChange = (val: string) => {
+    setAssignedTeam(val);
+    if (validationErrors.assignedTeam) {
+      setValidationErrors((prev) => ({ ...prev, assignedTeam: undefined }));
+    }
+    onUpdateBayDraft?.(selectedBay.id, {
+      category,
+      priority,
+      notes,
+      actionRequired,
+      assignedTeam: val,
+      isDirty: true,
+    });
+  };
+
+  const handleActionRequiredChange = (val: string) => {
+    setActionRequired(val);
+    onUpdateBayDraft?.(selectedBay.id, {
+      category,
+      priority,
+      notes,
+      actionRequired: val,
+      assignedTeam,
+      isDirty: true,
+    });
+  };
+
+  const handleNotesChange = (val: string) => {
+    setNotes(val);
+    if (validationErrors.notes) {
+      setValidationErrors((prev) => ({ ...prev, notes: undefined }));
+    }
+    onUpdateBayDraft?.(selectedBay.id, {
+      category,
+      priority,
+      notes: val,
+      actionRequired,
+      assignedTeam,
+      isDirty: true,
+    });
+  };
+
   const handleSubmitFlag = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked) return;
+
+    // Trim whitespace before validation
+    const trimmedNotes = notes.trim();
+    const trimmedAssignedTeam = assignedTeam.trim();
+    const trimmedActionRequired = actionRequired.trim();
+
+    const errors: { assignedTeam?: string; notes?: string } = {};
+
+    // Whitespace-only input must be treated as empty with a clear validation message
+    if (!trimmedAssignedTeam) {
+      errors.assignedTeam = 'Assign Action to Incoming Team is required and cannot be empty or whitespace only.';
+    }
+
+    // Do NOT automatically generate diagnostic notes when input is only whitespace
+    if (!trimmedNotes) {
+      errors.notes = 'Technician Diagnostic Notes are required and cannot be empty or whitespace only.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      return;
+    }
+
+    setValidationErrors({});
 
     const newFlag: BayFlag = {
       flagId: selectedBay.activeFlag?.flagId || `FLG-${selectedBay.id.replace('BAY-', '')}-${Date.now().toString().slice(-4)}`,
@@ -164,20 +349,25 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
       technicianName: currentTechnician,
       category,
       priority,
-      notes: notes.trim() || `Abnormal reading flagged by ${currentTechnician}.`,
-      actionRequired: actionRequired.trim() || 'Inspect bay sensors and verify automated dosing.',
-      assignedTeam,
+      notes: trimmedNotes,
+      actionRequired: trimmedActionRequired || 'Inspect bay sensors and verify automated dosing.',
+      assignedTeam: trimmedAssignedTeam,
       resolved: false,
     };
 
     onFlagBay(selectedBay.id, newFlag);
+    // Clear draft for this bay upon successful submission
+    onClearBayDraft?.(selectedBay.id);
+
     setToastMessage(`Bay ${selectedBay.id} flagged! Status updated to "Flagged" and added to incoming shift handover list.`);
     setShowSuccessToast(true);
     setTimeout(() => setShowSuccessToast(false), 5000);
   };
 
   const handleResolve = () => {
+    if (isLocked) return;
     onResolveFlag(selectedBay.id);
+    onClearBayDraft?.(selectedBay.id);
     setToastMessage(`Flag on Bay ${selectedBay.id} resolved and marked cleared.`);
     setShowSuccessToast(true);
     setTimeout(() => setShowSuccessToast(false), 5000);
@@ -213,7 +403,7 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
         <div className="flex items-center gap-2.5 min-w-0">
           <button
             id="back-to-overview-btn"
-            onClick={onBackToOverview}
+            onClick={handleBackToOverview}
             className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer flex-shrink-0"
             title="Back to Overview"
           >
@@ -231,7 +421,7 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <button
-            onClick={onProceedToHandover}
+            onClick={handleProceedToHandover}
             className="w-full sm:w-auto justify-center px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer min-h-[44px]"
           >
             <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
@@ -309,11 +499,14 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
         >
           {bays.map((bay) => {
             const isSelected = bay.id === selectedBayId;
+            const baySev = getBayEffectiveSeverity(bay);
+            const isFlagged = bay.status === 'Flagged' || Boolean(bay.activeFlag);
+
             return (
               <button
                 key={bay.id}
                 id={`select-bay-pill-${bay.id.toLowerCase()}`}
-                onClick={() => onSelectBay(bay.id)}
+                onClick={() => handleSelectBay(bay.id)}
                 className={`flex-shrink-0 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer min-h-[44px] min-w-[88px] justify-center whitespace-nowrap ${
                   isSelected
                     ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md ring-2 ring-emerald-500 font-black scale-[1.02]'
@@ -323,17 +516,20 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
                 {/* Status Dot */}
                 <span
                   className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                    bay.status === 'Flagged'
+                    isFlagged
                       ? 'bg-indigo-500 animate-pulse'
-                      : bay.status === 'Critical'
+                      : baySev === 'Critical'
                       ? 'bg-rose-500 animate-ping'
-                      : bay.status === 'Warning'
+                      : baySev === 'Warning'
                       ? 'bg-amber-500'
                       : 'bg-emerald-500'
                   }`}
                 />
                 <span className="font-mono">{bay.id}</span>
-                {bay.status === 'Flagged' && (
+                {bayDrafts?.[bay.id]?.isDirty && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" title="Unsaved draft notes" />
+                )}
+                {isFlagged && (
                   <Flag className="w-3 h-3 text-indigo-400 fill-indigo-400 flex-shrink-0" />
                 )}
               </button>
@@ -347,13 +543,29 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
         {/* Bay Header */}
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-mono font-black px-2.5 py-1 rounded bg-slate-900 text-white dark:bg-slate-800 dark:text-slate-200">
                 {selectedBay.id}
               </span>
               <span className="text-xs font-semibold text-slate-500">
                 {selectedBay.name}
               </span>
+              {bayDrafts?.[selectedBay.id]?.isDirty && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 rounded-full border border-amber-300 dark:border-amber-800 flex items-center gap-1">
+                    <Edit3 className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                    Unsaved Draft
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleDiscardDraft}
+                    className="text-[10px] font-bold text-slate-500 hover:text-rose-500 underline cursor-pointer"
+                    title="Discard unsaved draft changes"
+                  >
+                    Discard Draft
+                  </button>
+                </div>
+              )}
             </div>
             <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100 mt-1">
               {selectedBay.cropType}
@@ -372,19 +584,19 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
             ) : (
               <div
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 ${
-                  selectedBay.status === 'Normal'
+                  getBayEffectiveSeverity(selectedBay) === 'Normal'
                     ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
-                    : selectedBay.status === 'Warning'
+                    : getBayEffectiveSeverity(selectedBay) === 'Warning'
                     ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300'
                     : 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300'
                 }`}
               >
-                {selectedBay.status === 'Normal' ? (
+                {getBayEffectiveSeverity(selectedBay) === 'Normal' ? (
                   <CheckCircle2 className="w-4 h-4" />
                 ) : (
                   <AlertTriangle className="w-4 h-4" />
                 )}
-                Status: {selectedBay.status}
+                Status: {getBayEffectiveSeverity(selectedBay)}
               </div>
             )}
           </div>
@@ -593,7 +805,12 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
           {selectedBay.activeFlag && (
             <button
               onClick={handleResolve}
-              className="w-full sm:w-auto justify-center px-3 py-2 rounded-xl text-xs font-bold bg-emerald-100 hover:bg-emerald-200 text-emerald-900 dark:bg-emerald-950 dark:hover:bg-emerald-900 dark:text-emerald-300 transition-colors flex items-center gap-1.5 cursor-pointer min-h-[44px]"
+              disabled={isLocked}
+              className={`w-full sm:w-auto justify-center px-3 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 min-h-[44px] ${
+                isLocked
+                  ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed opacity-60'
+                  : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-900 dark:bg-emerald-950 dark:hover:bg-emerald-900 dark:text-emerald-300 cursor-pointer'
+              }`}
             >
               <RotateCcw className="w-4 h-4" />
               Resolve & Clear Flag
@@ -601,7 +818,16 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
           )}
         </div>
 
-        <form onSubmit={handleSubmitFlag} className="space-y-4">
+        {isLocked && (
+          <div className="mb-4 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2.5">
+            <Lock className="w-4 h-4 text-amber-400 flex-shrink-0" />
+            <span>
+              <strong>Shift Log Locked & Confirmed.</strong> Handover flags and technician notes are read-only. Reopen the shift log from the Handover tab to make modifications.
+            </span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmitFlag} noValidate className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Issue Category */}
             <div>
@@ -610,9 +836,10 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
               </label>
               <select
                 id="issue-category-select"
+                disabled={isLocked}
                 value={category}
-                onChange={(e) => setCategory(e.target.value as IssueCategory)}
-                className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none min-h-[44px]"
+                onChange={(e) => handleCategoryChange(e.target.value as IssueCategory)}
+                className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none min-h-[44px] disabled:opacity-60 disabled:cursor-not-allowed"
                 required
               >
                 {ISSUE_CATEGORIES.map((cat) => (
@@ -635,15 +862,18 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
                     <button
                       key={lvl}
                       type="button"
-                      onClick={() => setPriority(lvl)}
-                      className={`py-2 px-1 text-xs font-bold rounded-lg border transition-all cursor-pointer min-h-[44px] flex items-center justify-center ${
-                        isSelected
+                      disabled={isLocked}
+                      onClick={() => handlePriorityChange(lvl)}
+                      className={`py-2 px-1 text-xs font-bold rounded-lg border transition-all min-h-[44px] flex items-center justify-center ${
+                        isLocked
+                          ? 'opacity-60 cursor-not-allowed bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700'
+                          : isSelected
                           ? lvl === 'Critical'
-                            ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                            ? 'bg-rose-600 text-white border-rose-600 shadow-sm cursor-pointer'
                             : lvl === 'High'
-                            ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
-                            : 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                          : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-sm cursor-pointer'
+                            : 'bg-indigo-600 text-white border-indigo-600 shadow-sm cursor-pointer'
+                          : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer'
                       }`}
                     >
                       {lvl}
@@ -659,17 +889,28 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
             <div>
               <label htmlFor="assigned-team-input" className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1">
                 <Users className="w-3.5 h-3.5 text-slate-400" />
-                Assign Action to Incoming Team
+                Assign Action to Incoming Team <span className="text-rose-500">*</span>
               </label>
               <input
                 id="assigned-team-input"
                 type="text"
+                disabled={isLocked}
                 value={assignedTeam}
-                onChange={(e) => setAssignedTeam(e.target.value)}
+                onChange={(e) => handleAssignedTeamChange(e.target.value)}
                 placeholder="e.g. Night Shift Dosing Specialist"
-                className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none min-h-[44px]"
+                className={`w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border text-xs text-slate-900 dark:text-slate-100 focus:ring-2 focus:outline-none min-h-[44px] disabled:opacity-60 disabled:cursor-not-allowed ${
+                  validationErrors.assignedTeam
+                    ? 'border-rose-500 ring-1 ring-rose-500 focus:ring-rose-500'
+                    : 'border-slate-200 dark:border-slate-700 focus:ring-indigo-500'
+                }`}
                 required
               />
+              {validationErrors.assignedTeam && (
+                <p id="assigned-team-validation-error" className="mt-1.5 text-xs font-semibold text-rose-500 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>{validationErrors.assignedTeam}</span>
+                </p>
+              )}
             </div>
 
             {/* Outgoing Tech Signature */}
@@ -695,10 +936,11 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
             <input
               id="action-required-input"
               type="text"
+              disabled={isLocked}
               value={actionRequired}
-              onChange={(e) => setActionRequired(e.target.value)}
+              onChange={(e) => handleActionRequiredChange(e.target.value)}
               placeholder="e.g. Perform 15% reservoir water dilution and verify automated acid solenoid valve."
-              className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none min-h-[44px]"
+              className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none min-h-[44px] disabled:opacity-60 disabled:cursor-not-allowed"
             />
           </div>
 
@@ -710,12 +952,23 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
             <textarea
               id="technician-notes-textarea"
               rows={3}
+              disabled={isLocked}
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              onChange={(e) => handleNotesChange(e.target.value)}
               placeholder="Detail observations, troubleshooting performed, manual test strip comparisons, or physical pump symptoms..."
-              className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed min-h-[90px]"
+              className={`w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border text-xs text-slate-900 dark:text-slate-100 focus:ring-2 focus:outline-none leading-relaxed min-h-[90px] disabled:opacity-60 disabled:cursor-not-allowed ${
+                validationErrors.notes
+                  ? 'border-rose-500 ring-1 ring-rose-500 focus:ring-rose-500'
+                  : 'border-slate-200 dark:border-slate-700 focus:ring-indigo-500'
+              }`}
               required
             />
+            {validationErrors.notes && (
+              <p id="technician-notes-validation-error" className="mt-1.5 text-xs font-semibold text-rose-500 flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>{validationErrors.notes}</span>
+              </p>
+            )}
           </div>
 
           {/* Submit CTA Button */}
@@ -723,10 +976,15 @@ export const BayInspectionActionForm: React.FC<BayInspectionActionFormProps> = (
             <button
               id="submit-flag-btn"
               type="submit"
-              className="w-full sm:w-auto px-6 py-3 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer min-h-[48px]"
+              disabled={isLocked}
+              className={`w-full sm:w-auto px-6 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all min-h-[48px] ${
+                isLocked
+                  ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-60'
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md cursor-pointer'
+              }`}
             >
               <Save className="w-4 h-4" />
-              <span>{selectedBay.activeFlag ? 'Update Flag & Alerts' : 'Submit Flag for Incoming Shift'}</span>
+              <span>{isLocked ? 'Shift Log Locked (Read-Only)' : selectedBay.activeFlag ? 'Update Flag & Alerts' : 'Submit Flag for Incoming Shift'}</span>
             </button>
           </div>
         </form>

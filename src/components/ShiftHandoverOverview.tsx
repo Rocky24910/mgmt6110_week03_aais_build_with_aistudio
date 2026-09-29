@@ -1,5 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { HydroBay, ShiftInfo } from '../types';
+import { 
+  getBayEffectiveSeverity, 
+  getHighestPriorityUnresolvedBay 
+} from '../utils/bayPrioritization';
 import { BayCard } from './BayCard';
 import { LiveExternalConditions } from './LiveExternalConditions';
 import { 
@@ -31,12 +35,12 @@ export const ShiftHandoverOverview: React.FC<ShiftHandoverOverviewProps> = ({
   const [filter, setFilter] = useState<FilterOption>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Calculate KPIs
+  // Calculate KPIs using underlying bay severity
   const totalBays = bays.length;
-  const normalBays = bays.filter((b) => b.status === 'Normal').length;
-  const warningBays = bays.filter((b) => b.status === 'Warning').length;
-  const criticalBays = bays.filter((b) => b.status === 'Critical').length;
-  const flaggedBays = bays.filter((b) => b.status === 'Flagged').length;
+  const normalBays = bays.filter((b) => getBayEffectiveSeverity(b) === 'Normal').length;
+  const warningBays = bays.filter((b) => getBayEffectiveSeverity(b) === 'Warning').length;
+  const criticalBays = bays.filter((b) => getBayEffectiveSeverity(b) === 'Critical').length;
+  const flaggedBays = bays.filter((b) => b.status === 'Flagged' || Boolean(b.activeFlag)).length;
   const abnormalCount = warningBays + criticalBays;
 
   const avgPh = (bays.reduce((acc, b) => acc + b.pH, 0) / totalBays).toFixed(2);
@@ -53,24 +57,30 @@ export const ShiftHandoverOverview: React.FC<ShiftHandoverOverviewProps> = ({
 
       if (!matchesSearch) return false;
 
+      const sev = getBayEffectiveSeverity(bay);
+
       // Filter matching
       if (filter === 'action_needed') {
-        return bay.status === 'Warning' || bay.status === 'Critical' || bay.status === 'Flagged';
+        return sev === 'Warning' || sev === 'Critical' || bay.status === 'Flagged' || Boolean(bay.activeFlag);
       }
       if (filter === 'flagged') {
-        return bay.status === 'Flagged';
+        return bay.status === 'Flagged' || Boolean(bay.activeFlag);
       }
       if (filter === 'optimal') {
-        return bay.status === 'Normal';
+        return sev === 'Normal';
       }
       return true;
     });
   }, [bays, filter, searchQuery]);
 
-  // Find first unflagged abnormal bay to suggest quick action
-  const firstAbnormal = bays.find(
-    (b) => (b.status === 'Critical' || b.status === 'Warning') && !b.activeFlag
-  );
+  // Find highest-priority unresolved bay (Critical -> Warning -> Normal)
+  const prioritizedAbnormal = getHighestPriorityUnresolvedBay(bays);
+  const prioritizedSeverity = prioritizedAbnormal ? getBayEffectiveSeverity(prioritizedAbnormal) : null;
+  const abnormalCtaLabel = prioritizedAbnormal
+    ? prioritizedSeverity === 'Critical'
+      ? `Inspect Critical (${prioritizedAbnormal.id})`
+      : `Inspect Warning (${prioritizedAbnormal.id})`
+    : null;
 
   return (
     <div className="space-y-6 pb-20 md:pb-8">
@@ -97,14 +107,18 @@ export const ShiftHandoverOverview: React.FC<ShiftHandoverOverviewProps> = ({
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-shrink-0 w-full sm:w-auto">
-            {firstAbnormal && (
+            {prioritizedAbnormal && (
               <button
                 id="cta-inspect-first-abnormal"
-                onClick={() => onInspectBay(firstAbnormal.id)}
-                className="px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer min-h-[44px] whitespace-nowrap"
+                onClick={() => onInspectBay(prioritizedAbnormal.id)}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer min-h-[44px] whitespace-nowrap ${
+                  prioritizedSeverity === 'Critical'
+                    ? 'bg-rose-500 hover:bg-rose-400 active:bg-rose-600 text-white animate-pulse'
+                    : 'bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950'
+                }`}
               >
-                <AlertTriangle className="w-4 h-4 text-slate-950 fill-amber-300 flex-shrink-0" />
-                <span>Inspect Abnormal ({firstAbnormal.id})</span>
+                <AlertTriangle className={`w-4 h-4 flex-shrink-0 ${prioritizedSeverity === 'Critical' ? 'text-white' : 'text-slate-950 fill-amber-300'}`} />
+                <span>{abnormalCtaLabel}</span>
                 <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
               </button>
             )}

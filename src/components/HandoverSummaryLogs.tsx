@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { HydroBay, ShiftInfo, ActivityLog, HandoverChecklistItem } from '../types';
 import { 
+  getBayEffectiveSeverity, 
+  getUnresolvedAbnormalBays 
+} from '../utils/bayPrioritization';
+import { 
   FileCheck, 
   ShieldCheck, 
   AlertTriangle, 
@@ -45,19 +49,32 @@ export const HandoverSummaryLogs: React.FC<HandoverSummaryLogsProps> = ({
   onUnlockShift,
 }) => {
   const [newLogText, setNewLogText] = useState('');
+  const [logInputError, setLogInputError] = useState<string | null>(null);
 
-  const flaggedBays = bays.filter((b) => b.status === 'Flagged' || b.activeFlag);
-  const unflaggedAbnormal = bays.filter(
-    (b) => (b.status === 'Warning' || b.status === 'Critical') && !b.activeFlag
-  );
+  const flaggedBays = bays.filter((b) => b.status === 'Flagged' || Boolean(b.activeFlag));
+  // Unresolved abnormal bays prioritized: Critical -> Warning -> Normal
+  const unflaggedAbnormal = getUnresolvedAbnormalBays(bays);
+  const highestUnresolved = unflaggedAbnormal.length > 0 ? unflaggedAbnormal[0] : null;
+  const highestUnresolvedSev = highestUnresolved ? getBayEffectiveSeverity(highestUnresolved) : null;
+  const abnormalCtaLabel = highestUnresolved
+    ? highestUnresolvedSev === 'Critical'
+      ? `Inspect Critical (${highestUnresolved.id})`
+      : `Inspect Warning (${highestUnresolved.id})`
+    : null;
 
   const completedChecks = checklist.filter((c) => c.completed).length;
   const checklistPct = Math.round((completedChecks / checklist.length) * 100);
 
   const handleAddLogSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newLogText.trim()) return;
-    onAddLog(newLogText.trim());
+    if (shiftInfo.isLocked) return;
+    const trimmed = newLogText.trim();
+    if (!trimmed) {
+      setLogInputError('Handover observation note is required and cannot be empty or whitespace only.');
+      return;
+    }
+    setLogInputError(null);
+    onAddLog(trimmed);
     setNewLogText('');
   };
 
@@ -91,9 +108,20 @@ export const HandoverSummaryLogs: React.FC<HandoverSummaryLogsProps> = ({
           {/* Buttons Row: Status Indicator, Print/Save PDF, and Confirm Handover */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5 flex-shrink-0 w-full lg:w-auto">
             {shiftInfo.isLocked ? (
-              <div className="w-full sm:w-auto px-3.5 py-2.5 rounded-xl text-xs font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-700/80 flex items-center justify-center gap-1.5 min-h-[44px] shadow-sm">
-                <Lock className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                <span>Locked & Confirmed</span>
+              <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                <div className="flex-1 sm:flex-none px-3.5 py-2.5 rounded-xl text-xs font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-700/80 flex items-center justify-center gap-1.5 min-h-[44px] shadow-sm">
+                  <Lock className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                  <span>Locked & Confirmed</span>
+                </div>
+                <button
+                  id="reopen-log-banner-btn"
+                  onClick={onUnlockShift}
+                  className="px-3 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer min-h-[44px] flex items-center justify-center gap-1"
+                  title="Reopen shift log to make modifications"
+                >
+                  <Unlock className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Reopen Log</span>
+                </button>
               </div>
             ) : (
               <div className="w-full sm:w-auto px-3.5 py-2.5 rounded-xl text-xs font-bold bg-amber-950/80 text-amber-300 border border-amber-700/80 flex items-center justify-center gap-1.5 min-h-[44px] text-center shadow-sm">
@@ -226,7 +254,7 @@ export const HandoverSummaryLogs: React.FC<HandoverSummaryLogsProps> = ({
                       onClick={() => onInspectBay(bay.id)}
                       className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer min-h-[40px]"
                     >
-                      Edit Flag
+                      {shiftInfo.isLocked ? 'View Flag (Locked)' : 'Edit Flag'}
                     </button>
                   </div>
                 </div>
@@ -256,7 +284,7 @@ export const HandoverSummaryLogs: React.FC<HandoverSummaryLogsProps> = ({
         )}
 
         {/* Warning if there are unflagged abnormal bays */}
-        {unflaggedAbnormal.length > 0 && (
+        {unflaggedAbnormal.length > 0 && highestUnresolved && (
           <div className="mt-4 p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
@@ -265,15 +293,20 @@ export const HandoverSummaryLogs: React.FC<HandoverSummaryLogsProps> = ({
                   {unflaggedAbnormal.length} Abnormal Bay(s) Not Yet Flagged:
                 </span>{' '}
                 <span className="text-amber-800 dark:text-amber-300">
-                  {unflaggedAbnormal.map((b) => `${b.id} (${b.cropType})`).join(', ')}
+                  {unflaggedAbnormal.map((b) => `${b.id} (${getBayEffectiveSeverity(b)} - ${b.cropType})`).join(', ')}
                 </span>
               </div>
             </div>
             <button
-              onClick={() => onInspectBay(unflaggedAbnormal[0].id)}
-              className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white flex-shrink-0 cursor-pointer min-h-[44px] flex items-center justify-center"
+              id="handover-inspect-top-abnormal-btn"
+              onClick={() => onInspectBay(highestUnresolved.id)}
+              className={`w-full sm:w-auto px-3.5 py-2 rounded-lg text-xs font-bold text-white flex-shrink-0 cursor-pointer min-h-[44px] flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                highestUnresolvedSev === 'Critical'
+                  ? 'bg-rose-600 hover:bg-rose-500 animate-pulse'
+                  : 'bg-amber-600 hover:bg-amber-500'
+              }`}
             >
-              Inspect {unflaggedAbnormal[0].id}
+              <span>{abnormalCtaLabel}</span>
             </button>
           </div>
         )}
@@ -312,11 +345,19 @@ export const HandoverSummaryLogs: React.FC<HandoverSummaryLogsProps> = ({
           {checklist.map((item) => (
             <div
               key={item.id}
-              onClick={() => onToggleChecklist(item.id)}
-              className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-colors ${
+              onClick={() => {
+                if (!shiftInfo.isLocked) {
+                  onToggleChecklist(item.id);
+                }
+              }}
+              className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-colors ${
+                shiftInfo.isLocked
+                  ? 'cursor-not-allowed opacity-80'
+                  : 'cursor-pointer hover:border-slate-400'
+              } ${
                 item.completed
                   ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60 text-slate-900 dark:text-slate-100'
-                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-400'
+                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
               }`}
             >
               <div className="flex items-center gap-3">
@@ -329,9 +370,14 @@ export const HandoverSummaryLogs: React.FC<HandoverSummaryLogsProps> = ({
                   {item.label}
                 </span>
               </div>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono">
-                {item.category}
-              </span>
+              <div className="flex items-center gap-2">
+                {shiftInfo.isLocked && (
+                  <span className="text-[10px] text-slate-400 italic">Locked</span>
+                )}
+                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono">
+                  {item.category}
+                </span>
+              </div>
             </div>
           ))}
         </div>
@@ -355,22 +401,43 @@ export const HandoverSummaryLogs: React.FC<HandoverSummaryLogsProps> = ({
         </div>
 
         {/* Add quick observation log */}
-        <form onSubmit={handleAddLogSubmit} className="mb-4 flex flex-col sm:flex-row gap-2">
-          <input
-            id="new-activity-log-input"
-            type="text"
-            placeholder="Add handover note (e.g., 'Checked RO permeate tank; UV bulb replaced')..."
-            value={newLogText}
-            onChange={(e) => setNewLogText(e.target.value)}
-            className="flex-1 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 focus:outline-none min-h-[44px]"
-          />
-          <button
-            type="submit"
-            className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]"
-          >
-            <Plus className="w-4 h-4 flex-shrink-0" />
-            <span>Add Entry</span>
-          </button>
+        <form onSubmit={handleAddLogSubmit} className="mb-4">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              id="new-activity-log-input"
+              type="text"
+              disabled={shiftInfo.isLocked}
+              placeholder={
+                shiftInfo.isLocked
+                  ? 'Shift log is locked & confirmed. Reopen log to add new entries.'
+                  : "Add handover note (e.g., 'Checked RO permeate tank; UV bulb replaced')..."
+              }
+              value={newLogText}
+              onChange={(e) => {
+                setNewLogText(e.target.value);
+                if (logInputError) setLogInputError(null);
+              }}
+              className={`flex-1 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border text-xs text-slate-900 dark:text-slate-100 focus:ring-2 focus:outline-none min-h-[44px] disabled:opacity-60 disabled:cursor-not-allowed ${
+                logInputError
+                  ? 'border-rose-500 ring-1 ring-rose-500 focus:ring-rose-500'
+                  : 'border-slate-200 dark:border-slate-700 focus:ring-emerald-500'
+              }`}
+            />
+            <button
+              type="submit"
+              disabled={shiftInfo.isLocked}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus className="w-4 h-4 flex-shrink-0" />
+              <span>Add Entry</span>
+            </button>
+          </div>
+          {logInputError && (
+            <p className="mt-1.5 text-xs font-semibold text-rose-500 flex items-center gap-1">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+              <span>{logInputError}</span>
+            </p>
+          )}
         </form>
 
         {/* Activity Logs Timeline */}
