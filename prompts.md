@@ -1,5 +1,5 @@
 # PROMPTS.md - [HydroCrop Monitor]
-**Student:** [ZHIKUN ZHU] · **Course:** MGMT 6110 · **Problem Set 1-2**
+**Student:** [ZHIKUN ZHU] · **Course:** MGMT 6110 · **Problem Set 1-4**
 
 **User sentence:** A [vertical farm operations technician] opens this screen during shift handover to [monitor real-time pH and nutrient (EC) levels across 12 automated hydro bays, inspect and flag abnormal bays with technician notes, and complete the shift handover], and knows it worked when [the flagged bay status updates seamlessly and an automated handover summary report is generated for the incoming team].
 
@@ -1440,3 +1440,307 @@ Overall, I accepted the result because the revision improved the truthfulness of
 
 ---
 
+# Problem Set 4 — Adversarial Collaboration with Heuristic Evaluation
+
+---
+
+## Prompt 8 — Peer-feedback workflow integrity revision
+
+After receiving the heuristic evaluations from my three groupmates, I compared their findings and prioritised the repeated and higher-severity workflow problems before making further changes.
+
+The main issues I chose to address in this revision were:
+
+- the abnormal-bay shortcut prioritised BAY-03 (Warning) instead of the more serious BAY-07 (Critical);
+- the handover summary could claim that systems were verified or locked before the actual workflow was complete;
+- the shift could be confirmed while checklist items or abnormal bays remained unresolved;
+- controls could remain editable even after the handover appeared to be locked;
+- resolving a handover flag could incorrectly change the underlying operational severity of a bay.
+
+I deliberately kept this revision focused on workflow integrity rather than asking the AI to redesign the interface.
+
+### Prompt
+
+```text
+I have completed a Nielsen heuristic evaluation of this prototype with three independent peer testers. Please make a focused revision based on the confirmed usability problems below.
+
+IMPORTANT:
+- Preserve the current visual design, layout, navigation structure, dataset, weather feature, Disqus integration, Microsoft Clarity integration, and privacy notice.
+- Do NOT redesign the application.
+- Do NOT remove existing working features.
+- Make only the workflow and state-management changes described below.
+- Keep the prototype stable and buildable.
+- After making the changes, run the existing build/type checks and give me a concise summary of exactly what was changed.
+
+1. PRIORITISE CRITICAL BAYS
+
+Peer testers found that BAY-07 is Critical, but the main "Inspect Abnormal" shortcut directs the user to BAY-03, which is only Warning.
+
+Change the abnormal-bay prioritisation logic so unresolved bays are always prioritised:
+
+Critical → Warning → Normal.
+
+If a Critical bay is unresolved, the primary CTA should clearly identify it, for example:
+
+"Inspect Critical (BAY-07)"
+
+The abnormal-bay CTA on the Handover Summary should follow the same rule.
+
+When entering Bay Inspection through the primary abnormal/inspection workflow, prioritise the highest-severity unresolved bay rather than an arbitrary lower-severity bay.
+
+Do not change the underlying sensor readings just to achieve this.
+
+2. MAKE THE HANDOVER SUMMARY TRUTHFUL
+
+Peer testers found that the checklist can show only 3 of 5 verified while the summary preview still says:
+
+"Facility automated systems verified"
+
+They also found that the preview can display:
+
+"LOCKED & CONFIRMED BY OUTGOING TECHNICIAN"
+
+before the user has actually completed the final Confirm & Lock action.
+
+Fix this.
+
+The preview must always reflect the actual application state.
+
+Before final confirmation:
+- clearly label the summary as Draft / Pending Confirmation;
+- show the real checklist completion, such as "3 of 5 verified";
+- never claim that all automated systems are verified unless all required checklist items are actually complete;
+- never show LOCKED or CONFIRMED unless the final lock action has successfully occurred.
+
+3. PREVENT ACCIDENTAL INCOMPLETE HANDOVER
+
+The application currently allows a user to confirm a handover even when required checklist items remain incomplete and abnormal bays remain unresolved/unflagged.
+
+Before allowing final confirmation, check:
+- incomplete checklist items;
+- unresolved/unflagged abnormal bays.
+
+If anything remains outstanding, do NOT silently confirm.
+
+Show a clear confirmation/warning dialog that states exactly what remains unresolved, for example:
+
+"2 checklist items and 3 abnormal bays are still unresolved."
+
+Allow the user to return and complete them.
+
+If the prototype intentionally permits an override, the override must be explicit and require the user to acknowledge the outstanding items before proceeding. Never make incomplete confirmation look accidental.
+
+4. MAKE LOCKING MEAN LOCKED
+
+Once the final "Confirm & Lock Shift Log" action succeeds:
+- the handover status must become Locked & Confirmed;
+- checklist controls must no longer be editable;
+- existing handover flags/actions must not be silently editable;
+- activity/log entries associated with the locked handover must not be silently modified;
+- controls that would change the locked handover should be disabled or clearly marked unavailable.
+
+Do not leave the application in a state where the badge says "Locked & Confirmed" while the user can continue changing the handover.
+
+If an unlock/reopen workflow already exists, make it explicit. Do not invent a complicated new workflow if one does not exist.
+
+5. KEEP BAY SEVERITY SEPARATE FROM FLAG STATUS
+
+A peer tester found that resolving a flag on BAY-07 changed the bay from Critical to Warning even though its sensor readings had not changed.
+
+Fix this logic.
+
+Bay severity must be determined by the underlying bay readings/conditions, not by whether a handover flag is active, resolved, or removed.
+
+Resolving a flag means the handover action/flag has been addressed. It must NOT automatically reduce the operational severity of the bay unless the underlying sensor condition itself has changed.
+
+6. VALIDATION
+
+After implementing these changes, test at minimum:
+
+A. The main abnormal CTA chooses BAY-07 when BAY-07 is Critical and unresolved.
+
+B. With only 3/5 checklist items complete, the summary does NOT claim all systems are verified.
+
+C. Before final confirmation, the preview does NOT say Locked & Confirmed.
+
+D. Attempting to confirm with incomplete items produces a clear warning.
+
+E. After a successful lock, the handover cannot still be silently edited.
+
+F. Resolving BAY-07's flag does not change Critical to Warning unless its underlying readings change.
+
+Do not change unrelated styling or features.
+
+Finally, report:
+1. files/components changed;
+2. behaviour changed;
+3. validation performed;
+4. any limitation that still remains.
+```
+
+### What came back
+
+Google AI Studio made a relatively large state-management revision across the existing prototype.
+
+The reported implementation included:
+
+- adding an explicit operational severity model (`Normal`, `Warning`, `Critical`) so bay severity could be separated from handover flag state;
+- adding prioritisation logic that ranks unresolved abnormal bays `Critical → Warning → Normal`;
+- changing the primary abnormal-bay CTA on the Shift Overview so that BAY-07 is surfaced as `Inspect Critical (BAY-07)`;
+- applying the same prioritisation to the Handover Summary;
+- defaulting the Bay Inspection workflow to the highest-severity unresolved bay;
+- changing the pre-confirmation summary to `Draft / Pending Confirmation` rather than implying that the shift was already locked;
+- reporting actual checklist completion rather than claiming that all systems had been verified;
+- adding an incomplete-handover warning when checklist items or abnormal bays remain unresolved;
+- requiring explicit acknowledgement before an incomplete handover can be overridden;
+- disabling checklist changes, log creation, flag editing and flag resolution after the shift has been locked;
+- adding an explicit reopen action rather than allowing silent post-lock editing;
+- separating operational bay severity from flag status so that resolving a flag does not automatically downgrade a Critical bay.
+
+The AI reported that it validated six specific cases:
+
+1. BAY-07 was selected ahead of BAY-03 because Critical outranks Warning.
+2. A partially completed checklist no longer produced a fully verified summary.
+3. The pre-confirmation state displayed `Draft / Pending Confirmation` rather than `Locked & Confirmed`.
+4. Outstanding checklist items and abnormal bays triggered the warning workflow.
+5. Controls became read-only after locking.
+6. Resolving BAY-07's flag preserved its Critical operational severity while the underlying readings remained abnormal.
+
+It also reported zero TypeScript errors and a successful production build.
+
+One limitation was explicitly reported: the prototype still did not have a shared remote backend database, so operational state could not be treated as durable cross-device persistence.
+
+### What I accepted / rejected / changed and why
+
+I accepted the main workflow changes, but I did not rely only on the AI's validation report. I manually reviewed the revised screens and tested the most important failure case identified by the peer reviewers.
+
+On the Shift Overview, I confirmed that the primary action had changed to `Inspect Critical (BAY-07)`. Following that action opened BAY-07 on the Bay Inspection screen, where it remained visibly marked as Critical.
+
+I also manually tested the handover workflow with all five verification checklist items incomplete and three abnormal bays still unflagged.
+
+Instead of silently completing the handover, the application displayed an `Incomplete Handover Verification Warning`. The warning explicitly stated that `5 checklist items and 3 abnormal bays are still unresolved` and separately listed:
+
+- BAY-07 — Critical;
+- BAY-03 — Warning;
+- BAY-10 — Warning.
+
+The final override action was disabled until the user checked an acknowledgement confirming awareness of the unresolved items.
+
+I accepted this implementation because it changed a potentially misleading high-consequence action into an explicit decision. The system no longer presents an incomplete shift handover as if it were fully verified.
+
+I also accepted the separation between operational severity and flag status. A handover flag records an operational follow-up action, while Critical/Warning status represents the underlying condition of the bay. Resolving one should not automatically change the other.
+
+I did not attempt to solve the persistence finding by adding a new backend during this revision. The peer finding was valid, but introducing a shared database would have been a much larger architectural change than the focused heuristic revision. I therefore treated true refresh/cross-device persistence as an acknowledged limitation rather than pretending it had been solved.
+
+---
+
+## Prompt 9 — Protect unsaved technician input and reject whitespace-only fields
+
+After reviewing the first peer-feedback revision, I identified two additional peer findings that could still be addressed without redesigning the application.
+
+One peer found that edited diagnostic notes could be silently lost when switching between bays. Another found that required text fields could be bypassed by entering only spaces.
+
+I therefore made one final narrow revision focused on protecting technician input and improving validation.
+
+### Prompt
+
+```text
+Please make one final SMALL and focused usability revision. Do not redesign anything and do not modify unrelated components.
+
+Address only these two remaining peer findings:
+
+1. Unsaved diagnostic notes when switching bays
+
+A peer tester edited the Technician Diagnostic Notes for one bay, switched to another bay before submitting, then returned. The draft was silently lost and replaced by the original text.
+
+Prevent silent data loss.
+
+Preferred solution:
+- preserve an unsaved draft separately for each bay during the current session; OR
+- if preserving drafts would require a large architectural change, show a clear warning before switching away from a bay with modified unsaved fields.
+
+The user must never lose edited diagnostic notes silently.
+
+2. Required-field whitespace validation
+
+A peer tester entered only spaces into required text fields such as "Assign Action to Incoming Team" and Technician Diagnostic Notes. The form accepted the whitespace.
+
+For all required text inputs in the flag/handover form:
+- trim whitespace before validation;
+- whitespace-only input must be treated as empty;
+- show a clear validation message;
+- do not automatically generate diagnostic notes on behalf of the technician when the submitted input contains only whitespace.
+
+IMPORTANT:
+Do not change the current visual design.
+Do not modify the newly implemented Critical-bay prioritisation, handover confirmation logic, locking behaviour, operational severity logic, weather panel, Disqus, Clarity, or privacy notice.
+
+Run the type/build checks after the change.
+
+Then report only:
+1. what changed;
+2. validation performed;
+3. whether any limitation remains.
+```
+
+### What came back
+
+Google AI Studio implemented two focused changes.
+
+For unsaved diagnostic information, it added session-level draft state for individual bays. Edited technician diagnostic notes, the assigned incoming team and action specifications are now preserved when moving between bays or navigating between views during the current session.
+
+The interface also received explicit draft feedback:
+
+- a bay with unsaved modifications receives a draft indicator;
+- the active bay can display an `Unsaved Draft` badge;
+- the user has an explicit `Discard Draft` action;
+- the corresponding draft is cleared after a successful flag submission or resolution.
+
+For required-field validation, the AI added trimmed validation to the required text inputs. Whitespace-only values are now treated as empty rather than valid content.
+
+This applies to fields including:
+
+- `Assign Action to Incoming Team`;
+- `Technician Diagnostic Notes & Observations`;
+- the handover activity-log input.
+
+The application now blocks whitespace-only submission and displays visible validation feedback. It also no longer generates diagnostic notes on behalf of the technician when the submitted value contains only whitespace.
+
+The AI reported testing bay-switching draft retention by editing one bay, navigating to other bays and returning to the original bay. It reported that the edited draft remained intact.
+
+It also tested spaces-only values in the required fields and reported that the submissions were rejected without inserting auto-generated notes.
+
+The AI again reported zero TypeScript errors and a successful production build.
+
+The remaining limitation reported by the AI was that these drafts are session-scoped. A full hard browser refresh still resets the in-memory draft state.
+
+### What I accepted / rejected / changed and why
+
+I accepted both changes because they directly addressed observed peer behavior without expanding the scope of the product.
+
+The draft-preservation change addresses silent data loss. In this workflow, a technician may need to compare several abnormal bays before completing a handover note. Switching bays should not silently erase unfinished work. Session-level per-bay drafts are therefore a useful improvement even though they are not equivalent to durable backend persistence.
+
+I also accepted the stricter whitespace validation. A required field containing only spaces does not contain meaningful operational information and should not satisfy the same validation rule as an actual technician entry.
+
+I deliberately kept the solution session-scoped. The purpose of this revision was to fix the navigation-related data-loss problem discovered by the peer tester, not to introduce an entirely new storage architecture.
+
+The persistence limitation therefore remains explicit: unsaved drafts can survive navigation between bays and screens during the current session, but a hard browser refresh can still reset them. More broadly, the prototype still does not provide true shared cross-device persistence for a production shift-handover environment.
+
+After these two revision rounds, I stopped asking the AI for additional product changes and performed a final human review.
+
+I confirmed that:
+
+- BAY-07 remains visibly Critical and is prioritised by the main inspection action;
+- the critical workflow opens BAY-07 rather than a lower-severity Warning bay;
+- the Handover Summary remains pending before final confirmation;
+- incomplete verification produces a detailed warning rather than silently locking the handover;
+- unresolved checklist items and abnormal bays are clearly distinguished;
+- an explicit acknowledgement is required before an incomplete handover can be overridden;
+- operational severity remains separate from handover flag status;
+- unsaved bay drafts are protected while navigating during the current session;
+- whitespace-only required input is rejected.
+
+I did not implement every lower-severity or cosmetic peer suggestion.
+
+In particular, I retained the `Live External Conditions` feature. One peer felt that the weather panel occupied too much visual priority, while another specifically identified its freshness, source attribution, retry behavior and clear distinction from indoor farm telemetry as something that worked well. Because the feedback conflicted, I kept the useful functionality rather than removing it. Reducing its visual prominence remains a possible future refinement.
+
+I also did not claim that the persistence problem was fully solved. The lack of shared persistent storage remains the most important unresolved technical limitation identified through the adversarial evaluation.
